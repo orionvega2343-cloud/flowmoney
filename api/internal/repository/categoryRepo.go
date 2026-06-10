@@ -41,3 +41,11 @@ func (r *CategoryRepo) GetByUserId(id int) ([]models.Category, error) {
 	return c, nil
 
 }
+
+func (r *CategoryRepo) UpdateCategory(id int, title string) (models.Category, error) {
+	_, err := r.db.Exec(`UPDATE categories SET title=$1 WHERE id=$2`, title, id)
+	if err != nil {
+		return models.Category{}, err
+	}
+	return r.GetCategoryById(id)
+}
