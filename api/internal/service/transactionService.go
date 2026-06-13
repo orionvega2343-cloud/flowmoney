@@ -18,6 +18,8 @@ type TransactionServiceImpl struct {
 	Br repository.BudgetRepo
 }
 
+var ErrInsufficientFunds = errors.New("insufficient funds")
+
 func NewTransactionService(Tr repository.TransactionRepo, Ur repository.UserRepo, Br repository.BudgetRepo) *TransactionServiceImpl {
 	return &TransactionServiceImpl{Tr: Tr, Ur: Ur, Br: Br}
 }
@@ -38,7 +40,7 @@ func (r *TransactionServiceImpl) CreateTransaction(tr models.Transaction) (model
 	} else if tr.Type == "expense" {
 		currentBal -= tr.Amount
 		if currentBal < 0 {
-			return models.Transaction{}, errors.New("недостаточно средств")
+			return models.Transaction{}, ErrInsufficientFunds
 		}
 	}
 	_, err = r.Tr.CreateTransaction(tr)
