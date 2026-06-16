@@ -6,6 +6,13 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+type CategoryRepository interface {
+	CreateCategory(c models.Category) (models.Category, error)
+	GetCategoryById(id int) (models.Category, error)
+	GetByUserId(id int) ([]models.Category, error)
+	UpdateCategory(id int, title string) (models.Category, error)
+}
+
 type CategoryRepo struct {
 	db *sqlx.DB
 }

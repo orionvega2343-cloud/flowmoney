@@ -6,6 +6,12 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+type UserRepository interface {
+	CreateUser(u models.User) (models.User, error)
+	GetUserByEmail(email string) (models.User, error)
+	GetUserById(id int) (models.User, error)
+	UpdateBalance(id int, balance float64) (models.User, error)
+}
 type UserRepo struct {
 	db *sqlx.DB
 }
