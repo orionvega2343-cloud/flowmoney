@@ -6,6 +6,11 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+type TransactionRepository interface {
+	CreateTransaction(tr models.Transaction) (models.Transaction, error)
+	GetTransactionById(id int) (models.Transaction, error)
+	GetTransactionByUserId(userId int) ([]models.Transaction, error)
+}
 type TransactionRepo struct {
 	db *sqlx.DB
 }

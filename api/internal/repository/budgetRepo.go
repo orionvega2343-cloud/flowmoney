@@ -6,6 +6,14 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+type BudgetRepository interface {
+	CreateBudget(b models.Budget) (models.Budget, error)
+	GetBudgetById(id int) (models.Budget, error)
+	GetBudgetByCategoryId(catId int) (models.Budget, error)
+	GetByUserIdAndMonth(userId int, month int, year int) (models.Budget, error)
+	UpdateBudget(amount float64, id int) (models.Budget, error)
+}
+
 type BudgetRepo struct {
 	db *sqlx.DB
 }
