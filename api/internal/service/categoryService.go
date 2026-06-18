@@ -2,7 +2,6 @@ package service
 
 import (
 	"flowmoney/api/internal/models"
-	"flowmoney/api/internal/repository"
 )
 
 type CategoryService interface {
@@ -13,10 +12,10 @@ type CategoryService interface {
 }
 
 type CategoryServiceImpl struct {
-	Cr repository.CategoryRepo
+	Cr CategoryService
 }
 
-func NewCategoryService(cr repository.CategoryRepo) *CategoryServiceImpl {
+func NewCategoryService(cr CategoryService) *CategoryServiceImpl {
 	return &CategoryServiceImpl{Cr: cr}
 }
 

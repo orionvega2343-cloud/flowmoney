@@ -18,11 +18,11 @@ type BudgetService interface {
 }
 
 type BudgetServiceImpl struct {
-	B  repository.BudgetRepo
-	Tr repository.TransactionRepo
+	B  repository.BudgetRepository
+	Tr repository.TransactionRepository
 }
 
-func NewBudgetService(b repository.BudgetRepo, tr repository.TransactionRepo) *BudgetServiceImpl {
+func NewBudgetService(b repository.BudgetRepository, tr repository.TransactionRepository) *BudgetServiceImpl {
 	return &BudgetServiceImpl{B: b, Tr: tr}
 }
 

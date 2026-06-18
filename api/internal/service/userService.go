@@ -18,10 +18,10 @@ type UserService interface {
 }
 
 type UserServiceImpl struct {
-	Ur repository.UserRepo
+	Ur repository.UserRepository
 }
 
-func NewUserService(ur repository.UserRepo) *UserServiceImpl {
+func NewUserService(ur repository.UserRepository) *UserServiceImpl {
 	return &UserServiceImpl{Ur: ur}
 }
 

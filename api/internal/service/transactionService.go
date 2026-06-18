@@ -13,14 +13,14 @@ type TransactionService interface {
 }
 
 type TransactionServiceImpl struct {
-	Tr repository.TransactionRepo
-	Ur repository.UserRepo
-	Br repository.BudgetRepo
+	Tr repository.TransactionRepository
+	Ur repository.UserRepository
+	Br repository.BudgetRepository
 }
 
 var ErrInsufficientFunds = errors.New("insufficient funds")
 
-func NewTransactionService(Tr repository.TransactionRepo, Ur repository.UserRepo, Br repository.BudgetRepo) *TransactionServiceImpl {
+func NewTransactionService(Tr repository.TransactionRepository, Ur repository.UserRepository, Br repository.BudgetRepository) *TransactionServiceImpl {
 	return &TransactionServiceImpl{Tr: Tr, Ur: Ur, Br: Br}
 }
 

@@ -12,6 +12,7 @@ type BudgetRepository interface {
 	GetBudgetByCategoryId(catId int) (models.Budget, error)
 	GetByUserIdAndMonth(userId int, month int, year int) (models.Budget, error)
 	UpdateBudget(amount float64, id int) (models.Budget, error)
+	DeleteBudgetById(id int) error
 }
 
 type BudgetRepo struct {
