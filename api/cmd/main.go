@@ -29,10 +29,10 @@ func main() {
 	bRepo := repository.NewBudgetRepo(database)
 
 	//Services
-	uService := service.NewUserService(*uRepo)
-	cService := service.NewCategoryService(*cRepo)
-	tService := service.NewTransactionService(*tRepo, *uRepo, *bRepo)
-	bService := service.NewBudgetService(*bRepo, *tRepo)
+	uService := service.NewUserService(uRepo)
+	cService := service.NewCategoryService(cRepo)
+	tService := service.NewTransactionService(tRepo, uRepo, bRepo)
+	bService := service.NewBudgetService(bRepo, tRepo)
 
 	//Handlers
 	uHandler := handlers.NewUserHandler(uService, cfg.Jwt)
@@ -73,5 +73,8 @@ func main() {
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	fmt.Println("Сервер запущен!")
-	http.ListenAndServe(addr, middlewares.LoggerMiddleware(mux))
+	err = http.ListenAndServe(addr, middlewares.LoggerMiddleware(mux))
+	if err != nil {
+		log.Fatal(err)
+	}
 }
