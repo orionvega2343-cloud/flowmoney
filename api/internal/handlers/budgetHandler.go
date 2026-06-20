@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"flowmoney/api/internal/errs"
 	"flowmoney/api/internal/models"
 	"flowmoney/api/internal/service"
 	"net/http"
@@ -115,7 +116,7 @@ func (h *BudgetHandlerImpl) GetByUserIdAndMonth(w http.ResponseWriter, r *http.R
 	}
 
 	budget, err := h.Bs.GetByUserIdAndMonth(id, b.Month, b.Year)
-	if errors.Is(err, service.ErrBudgetExceeded) {
+	if errors.Is(err, errs.ErrBudgetExceeded) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

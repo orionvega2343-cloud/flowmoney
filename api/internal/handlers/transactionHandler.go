@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"flowmoney/api/internal/errs"
 	"flowmoney/api/internal/models"
 	"flowmoney/api/internal/service"
 	"net/http"
@@ -33,7 +34,7 @@ func (t *TransactionHandlerImpl) CreateTransaction(w http.ResponseWriter, r *htt
 	}
 
 	transaction, err := t.Ts.CreateTransaction(tx)
-	if errors.Is(err, service.ErrInsufficientFunds) {
+	if errors.Is(err, errs.ErrInsufficientFunds) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
