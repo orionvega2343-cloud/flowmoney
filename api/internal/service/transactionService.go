@@ -1,7 +1,7 @@
 package service
 
 import (
-	"errors"
+	"flowmoney/api/internal/errs"
 	"flowmoney/api/internal/models"
 	"flowmoney/api/internal/repository"
 )
@@ -17,8 +17,6 @@ type TransactionServiceImpl struct {
 	Ur repository.UserRepository
 	Br repository.BudgetRepository
 }
-
-var ErrInsufficientFunds = errors.New("insufficient funds")
 
 func NewTransactionService(Tr repository.TransactionRepository, Ur repository.UserRepository, Br repository.BudgetRepository) *TransactionServiceImpl {
 	return &TransactionServiceImpl{Tr: Tr, Ur: Ur, Br: Br}
@@ -40,7 +38,7 @@ func (r *TransactionServiceImpl) CreateTransaction(tr models.Transaction) (model
 	} else if tr.Type == "expense" {
 		currentBal -= tr.Amount
 		if currentBal < 0 {
-			return models.Transaction{}, ErrInsufficientFunds
+			return models.Transaction{}, errs.ErrInsufficientFunds
 		}
 	}
 	_, err = r.Tr.CreateTransaction(tr)

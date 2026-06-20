@@ -1,12 +1,10 @@
 package service
 
 import (
-	"errors"
+	"flowmoney/api/internal/errs"
 	"flowmoney/api/internal/models"
 	"flowmoney/api/internal/repository"
 )
-
-var ErrBudgetExceeded = errors.New("бюджет превышен")
 
 type BudgetService interface {
 	CreateBudget(b models.Budget) (models.Budget, error)
@@ -70,7 +68,7 @@ func (r *BudgetServiceImpl) GetByUserIdAndMonth(userId int, month int, year int)
 	}
 
 	if sum > res.Amount {
-		return models.Budget{}, ErrBudgetExceeded
+		return models.Budget{}, errs.ErrBudgetExceeded
 	}
 	return res, nil
 }
