@@ -24,6 +24,7 @@ func (c *Client) CreateBudget(UserId int, CategoryId int, Amount float64, month 
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -32,7 +33,7 @@ func (c *Client) CreateBudget(UserId int, CategoryId int, Amount float64, month 
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusCreated {
 		return models.Budget{}, errs.RequestFailed
 	}
 
@@ -86,7 +87,7 @@ func (c *Client) GetBudgetById(id int) (models.Budget, error) {
 
 func (c *Client) GetBudgetByCategoryId(catId int) (models.Budget, error) {
 
-	req, err := http.NewRequest("GET", c.apiUrl+"/budget/"+strconv.Itoa(catId), nil)
+	req, err := http.NewRequest("GET", c.apiUrl+"/budget/category/"+strconv.Itoa(catId), nil)
 	if err != nil {
 		return models.Budget{}, errs.RequestFailed
 	}
@@ -120,12 +121,20 @@ func (c *Client) GetBudgetByCategoryId(catId int) (models.Budget, error) {
 }
 
 func (c *Client) GetByUserIdAndMonth(userId int, month int, year int) (models.Budget, error) {
-	req, err := http.NewRequest("GET", c.apiUrl+"/budget/"+strconv.Itoa(userId)+"/monthly/"+strconv.Itoa(month)+"/year/"+strconv.Itoa(year), nil)
+	request := map[string]any{"month": month, "year": year}
+
+	toJSON, err := json.Marshal(request)
+	if err != nil {
+		return models.Budget{}, errs.FailedMarshall
+	}
+
+	req, err := http.NewRequest("GET", c.apiUrl+"/budget/month/"+strconv.Itoa(userId), bytes.NewBuffer(toJSON))
 	if err != nil {
 		return models.Budget{}, errs.RequestFailed
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -162,12 +171,13 @@ func (c *Client) UpdateBudget(amount float64, id int) (models.Budget, error) {
 		return models.Budget{}, errs.FailedMarshall
 	}
 
-	req, err := http.NewRequest("PUT", c.apiUrl+"/budget/"+strconv.Itoa(id), bytes.NewBuffer(toJSON))
+	req, err := http.NewRequest("PUT", c.apiUrl+"/budget/update/"+strconv.Itoa(id), bytes.NewBuffer(toJSON))
 	if err != nil {
 		return models.Budget{}, errs.RequestFailed
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -196,7 +206,7 @@ func (c *Client) UpdateBudget(amount float64, id int) (models.Budget, error) {
 }
 
 func (c *Client) DeleteBudgetById(id int) error {
-	req, err := http.NewRequest("DELETE", c.apiUrl+"/budget/delete"+strconv.Itoa(id), nil)
+	req, err := http.NewRequest("DELETE", c.apiUrl+"/budget/"+strconv.Itoa(id), nil)
 	if err != nil {
 		return errs.RequestFailed
 	}
@@ -210,7 +220,7 @@ func (c *Client) DeleteBudgetById(id int) error {
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusNoContent {
 		return errs.RequestFailed
 	}
 

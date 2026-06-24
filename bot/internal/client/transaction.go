@@ -19,12 +19,13 @@ func (c *Client) CreateTransaction(UserId int, amount float64, Type string, date
 		return models.Transaction{}, errs.FailedMarshall
 	}
 
-	req, err := http.NewRequest("POST", c.apiUrl+"/transaction", bytes.NewBuffer(toJSON))
+	req, err := http.NewRequest("POST", c.apiUrl+"/transactions", bytes.NewBuffer(toJSON))
 	if err != nil {
 		return models.Transaction{}, errs.RequestFailed
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -32,7 +33,7 @@ func (c *Client) CreateTransaction(UserId int, amount float64, Type string, date
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusCreated {
 		return models.Transaction{}, errs.FailedResponse
 	}
 
@@ -52,7 +53,7 @@ func (c *Client) CreateTransaction(UserId int, amount float64, Type string, date
 
 func (c *Client) GetTransactionById(id int) (models.Transaction, error) {
 
-	req, err := http.NewRequest("GET", c.apiUrl+"/transaction/"+strconv.Itoa(id), nil)
+	req, err := http.NewRequest("GET", c.apiUrl+"/transactions/"+strconv.Itoa(id), nil)
 	if err != nil {
 		return models.Transaction{}, errs.RequestFailed
 	}
@@ -87,7 +88,7 @@ func (c *Client) GetTransactionById(id int) (models.Transaction, error) {
 
 func (c *Client) GetTransactionByUserId(userId int) ([]models.Transaction, error) {
 
-	req, err := http.NewRequest("GET", c.apiUrl+"/transaction/"+strconv.Itoa(userId), nil)
+	req, err := http.NewRequest("GET", c.apiUrl+"/transactions/user/"+strconv.Itoa(userId), nil)
 	if err != nil {
 		return []models.Transaction{}, errs.RequestFailed
 	}
