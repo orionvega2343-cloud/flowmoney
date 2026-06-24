@@ -9,8 +9,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tele "gopkg.in/telebot.v3"
+
 	"golang.org/x/net/proxy"
 )
 
@@ -22,24 +24,21 @@ func main() {
 		log.Fatal(err)
 	}
 
-	bot, err := tgbotapi.NewBotAPIWithClient(cfg.Token, tgbotapi.APIEndpoint, httpClient)
+	bot, err := tele.NewBot(tele.Settings{
+		Token:     cfg.Token,
+		Client:    httpClient,
+		ParseMode: tele.ModeHTML,
+		Poller:    &tele.LongPoller{Timeout: 60 * time.Second},
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("Бот запущен: @%s\n", bot.Self.UserName)
+	fmt.Printf("Бот запущен: @%s\n", bot.Me.Username)
 
-	router := handlers.NewRouter(handlers.Deps{
-		Bot:      bot,
-		Sessions: handlers.NewSessionStore(cfg.Bot.ApiUrl),
-	})
+	handlers.Register(bot, handlers.NewStore(cfg.Bot.ApiUrl))
 
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
-
-	for update := range bot.GetUpdatesChan(u) {
-		router.HandleUpdate(update)
-	}
+	bot.Start()
 }
 
 // newHTTPClient опционально заворачивает HTTP-клиент бота в прокси —
