@@ -24,7 +24,8 @@ func (c *Client) CreateCategory(title string, userId int) (models.Category, erro
 		return models.Category{}, errs.RequestFailed
 	}
 
-	req.Header.Set("Authorization", "Bearer"+c.token)
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -33,7 +34,7 @@ func (c *Client) CreateCategory(title string, userId int) (models.Category, erro
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusOK {
 		return models.Category{}, errors.New(resp.Status)
 	}
 
@@ -58,7 +59,7 @@ func (c *Client) GetCategoryById(id int) (models.Category, error) {
 		return models.Category{}, errs.RequestFailed
 	}
 
-	req.Header.Set("Authorization", "Bearer"+c.token)
+	req.Header.Set("Authorization", "Bearer "+c.token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -89,7 +90,7 @@ func (c *Client) GetByUserId(id int) ([]models.Category, error) {
 		return []models.Category{}, errs.RequestFailed
 	}
 
-	req.Header.Set("Authorization", "Bearer"+c.token)
+	req.Header.Set("Authorization", "Bearer "+c.token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -124,12 +125,13 @@ func (c *Client) UpdateCategory(id int, title string) (models.Category, error) {
 		return models.Category{}, errs.FailedMarshall
 	}
 
-	req, err := http.NewRequest("PUT", c.apiUrl+"/category/"+strconv.Itoa(id), bytes.NewBuffer(toJSON))
+	req, err := http.NewRequest("PUT", c.apiUrl+"/category/update/"+strconv.Itoa(id), bytes.NewBuffer(toJSON))
 	if err != nil {
 		return models.Category{}, errs.RequestFailed
 	}
 
-	req.Header.Set("Authorization", "Bearer"+c.token)
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

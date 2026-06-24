@@ -23,6 +23,7 @@ func (c *Client) Register(name, email, password string) error {
 	if err != nil {
 		return errs.RequestFailed
 	}
+	req.Header.Set("Content-Type", "application/json")
 	//Реализация запроса
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -49,6 +50,7 @@ func (c *Client) Login(email, password string) error {
 	if err != nil {
 		return errs.RequestFailed
 	}
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -120,11 +122,12 @@ func (c *Client) UpdateBalance(id int, balance float64) (models.User, error) {
 	}
 
 	//Created request
-	req, err := http.NewRequest("PUT", c.apiUrl+"/user/"+strconv.Itoa(id), bytes.NewBuffer(toJSON))
+	req, err := http.NewRequest("PUT", c.apiUrl+"/update/"+strconv.Itoa(id), bytes.NewBuffer(toJSON))
 	if err != nil {
 		return models.User{}, errs.RequestFailed
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
 
 	//Request approved
 	resp, err := c.httpClient.Do(req)
