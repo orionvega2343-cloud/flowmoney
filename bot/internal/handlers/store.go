@@ -5,10 +5,12 @@ import (
 	"sync"
 )
 
-// Account хранит авторизованного клиента flowmoney API для одного чата.
+// Account хранит авторизованного клиента flowmoney API для одного чата
+// и, если чат сейчас отвечает на вопросы бота, текущий шаг диалога.
 type Account struct {
 	Client *client.Client
 	UserId int
+	Step   *Step
 }
 
 func (a *Account) LoggedIn() bool {

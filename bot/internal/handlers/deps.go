@@ -7,8 +7,14 @@ type Deps struct {
 	Store *Store
 }
 
+// account возвращает аккаунт чата и сбрасывает незавершённый диалог —
+// любое нажатие кнопки или команда считается новым намерением пользователя.
+// Сам диалог (continueDialog) получает аккаунт напрямую через Store, минуя
+// этот сброс.
 func (d Deps) account(c tele.Context) *Account {
-	return d.Store.Get(c.Chat().ID)
+	acc := d.Store.Get(c.Chat().ID)
+	acc.Step = nil
+	return acc
 }
 
 // requireLogin отправляет приглашение войти, если у чата ещё нет аккаунта.

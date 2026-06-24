@@ -1,103 +1,176 @@
 package handlers
 
 import (
+	"errors"
 	"flowmoney/bot/internal/models"
 	"fmt"
 	"strconv"
+	"strings"
 
 	tele "gopkg.in/telebot.v3"
 )
 
-const budgetHelp = "📊 <b>Бюджет</b>\n\n" +
-	"Создать: /budget_new ID_категории Сумма Месяц Год\n" +
-	"По ID: /budget_get ID\n" +
-	"По категории: /budget_by_category ID_категории\n" +
-	"За месяц: /budget_by_month Месяц Год\n" +
-	"Изменить: /budget_update ID Сумма\n" +
-	"Удалить: /budget_delete ID"
+var (
+	btnBudgetNew      = tele.Btn{Unique: "bg_new"}
+	btnBudgetGet      = tele.Btn{Unique: "bg_get"}
+	btnBudgetByCat    = tele.Btn{Unique: "bg_by_cat"}
+	btnBudgetByMonth  = tele.Btn{Unique: "bg_by_month"}
+	btnBudgetUpdate   = tele.Btn{Unique: "bg_update"}
+	btnBudgetDelete   = tele.Btn{Unique: "bg_delete"}
+	btnBudgetNewCat   = tele.Btn{Unique: "bg_new_cat"}
+	btnBudgetByCatPck = tele.Btn{Unique: "bg_by_cat_pick"}
+)
 
 type BudgetHandlers struct{ Deps }
 
 func NewBudgetHandlers(d Deps) *BudgetHandlers { return &BudgetHandlers{d} }
 
 func (h *BudgetHandlers) Register(bot *tele.Bot) {
-	bot.Handle(txtBudget, h.help)
-	bot.Handle("/budget_new", h.create)
-	bot.Handle("/budget_get", h.get)
-	bot.Handle("/budget_by_category", h.getByCategory)
-	bot.Handle("/budget_by_month", h.getByMonth)
-	bot.Handle("/budget_update", h.update)
-	bot.Handle("/budget_delete", h.delete)
+	bot.Handle(txtBudget, h.menu)
+	bot.Handle(&btnBudgetNew, h.startNew)
+	bot.Handle(&btnBudgetNewCat, h.pickNewCategory)
+	bot.Handle(&btnBudgetGet, h.startGet)
+	bot.Handle(&btnBudgetByCat, h.startByCategory)
+	bot.Handle(&btnBudgetByCatPck, h.pickByCategory)
+	bot.Handle(&btnBudgetByMonth, h.startByMonth)
+	bot.Handle(&btnBudgetUpdate, h.startUpdate)
+	bot.Handle(&btnBudgetDelete, h.startDelete)
 }
 
-func (h *BudgetHandlers) help(c tele.Context) error {
-	acc := h.account(c)
-	if !h.requireLogin(c, acc) {
-		return nil
-	}
-	return c.Send(budgetHelp)
-}
-
-func (h *BudgetHandlers) create(c tele.Context) error {
+func (h *BudgetHandlers) menu(c tele.Context) error {
 	acc := h.account(c)
 	if !h.requireLogin(c, acc) {
 		return nil
 	}
 
-	args := c.Args()
-	if len(args) < 4 {
-		return c.Send("⚠️ Использование: /budget_new ID_категории Сумма Месяц Год")
-	}
-	categoryId, err1 := strconv.Atoi(args[0])
-	amount, err2 := strconv.ParseFloat(args[1], 64)
-	month, err3 := strconv.Atoi(args[2])
-	year, err4 := strconv.Atoi(args[3])
-	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
-		return c.Send("⚠️ Проверьте формат: /budget_new ID_категории Сумма Месяц Год")
-	}
-
-	budget, err := acc.Client.CreateBudget(acc.UserId, categoryId, amount, month, year)
-	if err != nil {
-		return h.fail(c, "не удалось создать бюджет", err)
-	}
-	return c.Send(fmt.Sprintf("✅ Бюджет <b>#%d</b> на <b>%.2f</b> создан (%02d.%d).", budget.Id, budget.Amount, budget.Month, budget.Year))
+	kb := &tele.ReplyMarkup{}
+	kb.Inline(
+		tele.Row{{Unique: "bg_new", Text: "➕ Новый бюджет"}},
+		tele.Row{
+			{Unique: "bg_get", Text: "🔎 По ID"},
+			{Unique: "bg_by_cat", Text: "🏷 По категории"},
+		},
+		tele.Row{{Unique: "bg_by_month", Text: "📅 За месяц"}},
+		tele.Row{
+			{Unique: "bg_update", Text: "✏️ Изменить"},
+			{Unique: "bg_delete", Text: "🗑 Удалить"},
+		},
+	)
+	return c.Send("📊 <b>Бюджет</b>", kb)
 }
 
-func (h *BudgetHandlers) get(c tele.Context) error {
+// categoryPickerMarkup строит инлайн-список категорий пользователя для
+// выбора — нажатие на категорию продолжит сценарий с заданным unique.
+func (h *BudgetHandlers) categoryPickerMarkup(acc *Account, unique string) (*tele.ReplyMarkup, error) {
+	categories, err := acc.Client.GetByUserId(acc.UserId)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]tele.Row, 0, len(categories))
+	for _, cat := range categories {
+		rows = append(rows, tele.Row{{Unique: unique, Text: fmt.Sprintf("🏷 #%d %s", cat.Id, cat.Title), Data: strconv.Itoa(cat.Id)}})
+	}
+	kb := &tele.ReplyMarkup{}
+	kb.Inline(rows...)
+	return kb, nil
+}
+
+func (h *BudgetHandlers) startNew(c tele.Context) error {
 	acc := h.account(c)
 	if !h.requireLogin(c, acc) {
 		return nil
 	}
 
-	args := c.Args()
-	if len(args) < 1 {
-		return c.Send("⚠️ Использование: /budget_get ID")
-	}
-	id, err := strconv.Atoi(args[0])
+	kb, err := h.categoryPickerMarkup(acc, "bg_new_cat")
 	if err != nil {
-		return c.Send("⚠️ ID должен быть числом.")
+		return h.fail(c, "не удалось получить категории", err)
 	}
-
-	budget, err := acc.Client.GetBudgetById(id)
-	if err != nil {
-		return h.fail(c, "не удалось найти бюджет", err)
-	}
-	return c.Send(formatBudget(budget))
+	return c.Send("➕ <b>Новый бюджет</b>\n\nВыберите категорию:", kb)
 }
 
-func (h *BudgetHandlers) getByCategory(c tele.Context) error {
+func (h *BudgetHandlers) pickNewCategory(c tele.Context) error {
 	acc := h.account(c)
 	if !h.requireLogin(c, acc) {
 		return nil
 	}
 
-	args := c.Args()
-	if len(args) < 1 {
-		return c.Send("⚠️ Использование: /budget_by_category ID_категории")
-	}
-	categoryId, err := strconv.Atoi(args[0])
+	categoryId, err := strconv.Atoi(c.Args()[0])
 	if err != nil {
-		return c.Send("⚠️ ID должен быть числом.")
+		return nil
+	}
+
+	return startDialog(c, acc, &Step{
+		Prompt: "Введите сумму бюджета:",
+		Next: func(reply string) StepResult {
+			amount, err := strconv.ParseFloat(strings.TrimSpace(reply), 64)
+			if err != nil {
+				return fail(errors.New("сумма должна быть числом"))
+			}
+			return ask("Введите месяц (1-12):", func(reply string) StepResult {
+				month, err := strconv.Atoi(strings.TrimSpace(reply))
+				if err != nil {
+					return fail(errors.New("месяц должен быть числом от 1 до 12"))
+				}
+				return ask("Введите год:", func(reply string) StepResult {
+					year, err := strconv.Atoi(strings.TrimSpace(reply))
+					if err != nil {
+						return fail(errors.New("год должен быть числом"))
+					}
+					budget, err := acc.Client.CreateBudget(acc.UserId, categoryId, amount, month, year)
+					if err != nil {
+						return fail(err)
+					}
+					return done(fmt.Sprintf("✅ Бюджет <b>#%d</b> на <b>%.2f</b> создан (%02d.%d).", budget.Id, budget.Amount, budget.Month, budget.Year))
+				})
+			})
+		},
+	})
+}
+
+func (h *BudgetHandlers) startGet(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
+	}
+
+	return startDialog(c, acc, &Step{
+		Prompt: "🔎 Введите ID бюджета:",
+		Next: func(reply string) StepResult {
+			id, err := strconv.Atoi(strings.TrimSpace(reply))
+			if err != nil {
+				return fail(errors.New("ID должен быть числом"))
+			}
+			budget, err := acc.Client.GetBudgetById(id)
+			if err != nil {
+				return fail(err)
+			}
+			return done(formatBudget(budget))
+		},
+	})
+}
+
+func (h *BudgetHandlers) startByCategory(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
+	}
+
+	kb, err := h.categoryPickerMarkup(acc, "bg_by_cat_pick")
+	if err != nil {
+		return h.fail(c, "не удалось получить категории", err)
+	}
+	return c.Send("🏷 Выберите категорию:", kb)
+}
+
+func (h *BudgetHandlers) pickByCategory(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
+	}
+
+	categoryId, err := strconv.Atoi(c.Args()[0])
+	if err != nil {
+		return nil
 	}
 
 	budget, err := acc.Client.GetBudgetByCategoryId(categoryId)
@@ -107,71 +180,81 @@ func (h *BudgetHandlers) getByCategory(c tele.Context) error {
 	return c.Send(formatBudget(budget))
 }
 
-func (h *BudgetHandlers) getByMonth(c tele.Context) error {
+func (h *BudgetHandlers) startByMonth(c tele.Context) error {
 	acc := h.account(c)
 	if !h.requireLogin(c, acc) {
 		return nil
 	}
 
-	args := c.Args()
-	if len(args) < 2 {
-		return c.Send("⚠️ Использование: /budget_by_month Месяц Год")
-	}
-	month, err1 := strconv.Atoi(args[0])
-	year, err2 := strconv.Atoi(args[1])
-	if err1 != nil || err2 != nil {
-		return c.Send("⚠️ Месяц и год должны быть числами.")
-	}
-
-	budget, err := acc.Client.GetByUserIdAndMonth(acc.UserId, month, year)
-	if err != nil {
-		return h.fail(c, "не удалось получить бюджет за месяц", err)
-	}
-	return c.Send(formatBudget(budget))
+	return startDialog(c, acc, &Step{
+		Prompt: "📅 Введите месяц (1-12):",
+		Next: func(reply string) StepResult {
+			month, err := strconv.Atoi(strings.TrimSpace(reply))
+			if err != nil {
+				return fail(errors.New("месяц должен быть числом от 1 до 12"))
+			}
+			return ask("Введите год:", func(reply string) StepResult {
+				year, err := strconv.Atoi(strings.TrimSpace(reply))
+				if err != nil {
+					return fail(errors.New("год должен быть числом"))
+				}
+				budget, err := acc.Client.GetByUserIdAndMonth(acc.UserId, month, year)
+				if err != nil {
+					return fail(err)
+				}
+				return done(formatBudget(budget))
+			})
+		},
+	})
 }
 
-func (h *BudgetHandlers) update(c tele.Context) error {
+func (h *BudgetHandlers) startUpdate(c tele.Context) error {
 	acc := h.account(c)
 	if !h.requireLogin(c, acc) {
 		return nil
 	}
 
-	args := c.Args()
-	if len(args) < 2 {
-		return c.Send("⚠️ Использование: /budget_update ID Сумма")
-	}
-	id, err1 := strconv.Atoi(args[0])
-	amount, err2 := strconv.ParseFloat(args[1], 64)
-	if err1 != nil || err2 != nil {
-		return c.Send("⚠️ Проверьте формат: /budget_update ID Сумма")
-	}
-
-	budget, err := acc.Client.UpdateBudget(amount, id)
-	if err != nil {
-		return h.fail(c, "не удалось изменить бюджет", err)
-	}
-	return c.Send(fmt.Sprintf("✅ Бюджет <b>#%d</b> обновлён: <b>%.2f</b>", budget.Id, budget.Amount))
+	return startDialog(c, acc, &Step{
+		Prompt: "✏️ Введите ID бюджета, который нужно изменить:",
+		Next: func(reply string) StepResult {
+			id, err := strconv.Atoi(strings.TrimSpace(reply))
+			if err != nil {
+				return fail(errors.New("ID должен быть числом"))
+			}
+			return ask("Введите новую сумму бюджета:", func(reply string) StepResult {
+				amount, err := strconv.ParseFloat(strings.TrimSpace(reply), 64)
+				if err != nil {
+					return fail(errors.New("сумма должна быть числом"))
+				}
+				budget, err := acc.Client.UpdateBudget(amount, id)
+				if err != nil {
+					return fail(err)
+				}
+				return done(fmt.Sprintf("✅ Бюджет <b>#%d</b> обновлён: <b>%.2f</b>", budget.Id, budget.Amount))
+			})
+		},
+	})
 }
 
-func (h *BudgetHandlers) delete(c tele.Context) error {
+func (h *BudgetHandlers) startDelete(c tele.Context) error {
 	acc := h.account(c)
 	if !h.requireLogin(c, acc) {
 		return nil
 	}
 
-	args := c.Args()
-	if len(args) < 1 {
-		return c.Send("⚠️ Использование: /budget_delete ID")
-	}
-	id, err := strconv.Atoi(args[0])
-	if err != nil {
-		return c.Send("⚠️ ID должен быть числом.")
-	}
-
-	if err := acc.Client.DeleteBudgetById(id); err != nil {
-		return h.fail(c, "не удалось удалить бюджет", err)
-	}
-	return c.Send(fmt.Sprintf("✅ Бюджет <b>#%d</b> удалён.", id))
+	return startDialog(c, acc, &Step{
+		Prompt: "🗑 Введите ID бюджета, который нужно удалить:",
+		Next: func(reply string) StepResult {
+			id, err := strconv.Atoi(strings.TrimSpace(reply))
+			if err != nil {
+				return fail(errors.New("ID должен быть числом"))
+			}
+			if err := acc.Client.DeleteBudgetById(id); err != nil {
+				return fail(err)
+			}
+			return done(fmt.Sprintf("✅ Бюджет <b>#%d</b> удалён.", id))
+		},
+	})
 }
 
 func formatBudget(b models.Budget) string {

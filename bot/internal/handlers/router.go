@@ -14,6 +14,10 @@ func Register(bot *tele.Bot, store *Store) {
 	NewBudgetHandlers(d).Register(bot)
 
 	bot.Handle(tele.OnText, func(c tele.Context) error {
+		acc := store.Get(c.Chat().ID)
+		if acc.Step != nil {
+			return continueDialog(c, acc)
+		}
 		return c.Send("Не понимаю 🤔 Воспользуйтесь клавиатурой ниже или командой /start.")
 	})
 }

@@ -1,16 +1,26 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	tele "gopkg.in/telebot.v3"
 )
 
-// btnTransactionGet — шаблон инлайн-кнопки для конкретной транзакции в
-// списке; нажатие сразу вызывает GetTransactionById с ID из callback-данных.
-var btnTransactionGet = tele.Btn{Unique: "tx_get"}
+var (
+	// btnTransactionGet — нажатие на транзакцию в списке вызывает
+	// GetTransactionById с ID из callback-данных.
+	btnTransactionGet = tele.Btn{Unique: "tx_get"}
+	btnTxIncome       = tele.Btn{Unique: "tx_income"}
+	btnTxExpense      = tele.Btn{Unique: "tx_expense"}
+	// btnTxIncomeCategory / btnTxExpenseCategory — выбор категории из списка
+	// для новой транзакции; ID категории приходит в callback-данных.
+	btnTxIncomeCategory  = tele.Btn{Unique: "tx_income_cat"}
+	btnTxExpenseCategory = tele.Btn{Unique: "tx_expense_cat"}
+)
 
 type TransactionHandlers struct{ Deps }
 
@@ -18,39 +28,80 @@ func NewTransactionHandlers(d Deps) *TransactionHandlers { return &TransactionHa
 
 func (h *TransactionHandlers) Register(bot *tele.Bot) {
 	bot.Handle(txtTransactions, h.list)
-	bot.Handle("/income", h.income)
-	bot.Handle("/expense", h.expense)
+	bot.Handle(&btnTxIncome, h.startIncome)
+	bot.Handle(&btnTxExpense, h.startExpense)
+	bot.Handle(&btnTxIncomeCategory, h.pickIncomeCategory)
+	bot.Handle(&btnTxExpenseCategory, h.pickExpenseCategory)
 	bot.Handle(&btnTransactionGet, h.get)
 }
 
-func (h *TransactionHandlers) income(c tele.Context) error  { return h.create(c, "income") }
-func (h *TransactionHandlers) expense(c tele.Context) error { return h.create(c, "expense") }
+func (h *TransactionHandlers) startIncome(c tele.Context) error  { return h.startCreate(c, "income") }
+func (h *TransactionHandlers) startExpense(c tele.Context) error { return h.startCreate(c, "expense") }
 
-func (h *TransactionHandlers) create(c tele.Context, txType string) error {
+// startCreate показывает список категорий, чтобы выбрать, к какой отнести
+// новую транзакцию — нажатие на категорию продолжит создание.
+func (h *TransactionHandlers) startCreate(c tele.Context, txType string) error {
 	acc := h.account(c)
 	if !h.requireLogin(c, acc) {
 		return nil
 	}
 
-	args := c.Args()
-	if len(args) < 2 {
-		return c.Send(fmt.Sprintf("⚠️ Использование: /%s Сумма ID_категории", txType))
-	}
-	amount, err := strconv.ParseFloat(args[0], 64)
+	categories, err := acc.Client.GetByUserId(acc.UserId)
 	if err != nil {
-		return c.Send("⚠️ Сумма должна быть числом.")
+		return h.fail(c, "не удалось получить категории", err)
 	}
-	categoryId, err := strconv.Atoi(args[1])
-	if err != nil {
-		return c.Send("⚠️ ID категории должен быть числом.")
+	if len(categories) == 0 {
+		return c.Send("📁 Сначала создайте категорию в разделе «Категории».")
 	}
 
-	transaction, err := acc.Client.CreateTransaction(acc.UserId, amount, txType, time.Now(), categoryId)
-	if err != nil {
-		return h.fail(c, "не удалось создать транзакцию", err)
+	unique := "tx_income_cat"
+	if txType == "expense" {
+		unique = "tx_expense_cat"
+	}
+	kb := &tele.ReplyMarkup{}
+	rows := make([]tele.Row, 0, len(categories))
+	for _, cat := range categories {
+		rows = append(rows, tele.Row{{Unique: unique, Text: fmt.Sprintf("🏷 #%d %s", cat.Id, cat.Title), Data: strconv.Itoa(cat.Id)}})
+	}
+	kb.Inline(rows...)
+
+	return c.Send("Выберите категорию:", kb)
+}
+
+func (h *TransactionHandlers) pickIncomeCategory(c tele.Context) error {
+	return h.startAmount(c, "income")
+}
+
+func (h *TransactionHandlers) pickExpenseCategory(c tele.Context) error {
+	return h.startAmount(c, "expense")
+}
+
+func (h *TransactionHandlers) startAmount(c tele.Context, txType string) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
 	}
 
-	return c.Send(fmt.Sprintf("✅ %s Транзакция <b>#%d</b> на сумму <b>%.2f</b> сохранена.", icon(txType), transaction.Id, transaction.Amount))
+	categoryId, err := strconv.Atoi(c.Args()[0])
+	if err != nil {
+		return nil
+	}
+
+	return startDialog(c, acc, &Step{
+		Prompt: fmt.Sprintf("%s Введите сумму:", icon(txType)),
+		Next: func(reply string) StepResult {
+			amount, err := strconv.ParseFloat(strings.TrimSpace(reply), 64)
+			if err != nil {
+				return fail(errors.New("сумма должна быть числом"))
+			}
+
+			transaction, err := acc.Client.CreateTransaction(acc.UserId, amount, txType, time.Now(), categoryId)
+			if err != nil {
+				return fail(err)
+			}
+			return done(fmt.Sprintf("✅ %s Транзакция <b>#%d</b> на сумму <b>%.2f</b> сохранена.", icon(txType), transaction.Id, transaction.Amount))
+		},
+	})
 }
 
 func (h *TransactionHandlers) list(c tele.Context) error {
@@ -63,19 +114,22 @@ func (h *TransactionHandlers) list(c tele.Context) error {
 	if err != nil {
 		return h.fail(c, "не удалось получить транзакции", err)
 	}
-	if len(transactions) == 0 {
-		return c.Send("💸 У вас пока нет транзакций.\n\nДоход: /income Сумма ID_категории\nРасход: /expense Сумма ID_категории")
-	}
 
-	rows := make([]tele.Row, 0, len(transactions))
+	kb := &tele.ReplyMarkup{}
+	rows := []tele.Row{{
+		{Unique: "tx_income", Text: "💵 Новый доход"},
+		{Unique: "tx_expense", Text: "💳 Новый расход"},
+	}}
 	for _, t := range transactions {
 		label := fmt.Sprintf("%s #%d %.2f — %s", icon(t.Type), t.Id, t.Amount, t.Date.Format("02.01.2006"))
 		rows = append(rows, tele.Row{{Unique: "tx_get", Text: label, Data: strconv.Itoa(t.Id)}})
 	}
-	kb := &tele.ReplyMarkup{}
 	kb.Inline(rows...)
 
-	text := "📋 <b>Ваши транзакции</b>\n\nДоход: /income Сумма ID_категории\nРасход: /expense Сумма ID_категории"
+	text := "📋 <b>Ваши транзакции</b>"
+	if len(transactions) == 0 {
+		text = "💸 У вас пока нет транзакций."
+	}
 	return c.Send(text, kb)
 }
 
