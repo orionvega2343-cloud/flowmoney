@@ -8,20 +8,28 @@ services:
     volumes:
         - postgres_data:/var/lib/postgresql/data
   api:
-    build: ./api
+    build:
+      context: .
+      dockerfile: api/Dockerfile
     environment:
       JWT_SECRET: ${JWT_SECRET}
     ports:
       - 8080:8080
     depends_on:
       - db
+    env_file:
+      - .env
   bot:
-    build: ./bot
+    build:
+      context: .
+      dockerfile: bot/Dockerfile
     environment:
       BOT_TOKEN: ${BOT_TOKEN}
       API_URL: http://api:8080
     depends_on:
       - api
+    env_file:
+      - .env
 volumes:
   postgres_data:
 
