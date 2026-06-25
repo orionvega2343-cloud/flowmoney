@@ -36,6 +36,16 @@ func main() {
 
 	fmt.Printf("Бот запущен: @%s\n", bot.Me.Username)
 
+	// Сбрасываем меню команд до единственного /start — раньше в BotFather
+	// были зарегистрированы текстовые команды (/login, /budget и т.п.),
+	// которые теперь заменены кнопками, но без явного SetCommands Telegram
+	// продолжает показывать их в меню "/".
+	if err := bot.SetCommands([]tele.Command{
+		{Text: "start", Description: "Запустить бота"},
+	}); err != nil {
+		log.Printf("не удалось обновить меню команд: %v", err)
+	}
+
 	handlers.Register(bot, handlers.NewStore(cfg.Bot.ApiUrl))
 
 	bot.Start()

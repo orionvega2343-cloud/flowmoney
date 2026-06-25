@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+        - postgres_data:/var/lib/postgresql/data
+  api:
+    build: ./api
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+    ports:
+      - 8080:8080
+    depends_on:
+      - db
+  bot:
+    build: ./bot
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      API_URL: http://api:8080
+    depends_on:
+      - api
+volumes:
+  postgres_data:
+
+
+
+
+

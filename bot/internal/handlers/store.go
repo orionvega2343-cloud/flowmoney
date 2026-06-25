@@ -14,14 +14,14 @@ type Account struct {
 }
 
 func (a *Account) LoggedIn() bool {
-	return a.UserId != 0
+	return a.UserId != 0 //Вернет true
 }
 
 // Store — по одному клиенту flowmoney API на чат, токен у каждого свой.
 type Store struct {
-	mu       sync.Mutex
-	accounts map[int64]*Account
-	apiUrl   string
+	mu       sync.Mutex         //Синхронизация помогает избежать raxe condition
+	accounts map[int64]*Account //Мапа аккаунта
+	apiUrl   string             //апи
 }
 
 func NewStore(apiUrl string) *Store {

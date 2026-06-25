@@ -22,7 +22,7 @@ func (d Deps) requireLogin(c tele.Context, acc *Account) bool {
 	if acc.LoggedIn() {
 		return true
 	}
-	_ = c.Send("🔒 Сначала войдите: /login Email Пароль")
+	_ = c.Send("🔒 Сначала войдите в аккаунт:", authMarkup())
 	return false
 }
 

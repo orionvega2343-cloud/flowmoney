@@ -39,7 +39,7 @@ func (h *TransactionHandlers) startIncome(c tele.Context) error  { return h.star
 func (h *TransactionHandlers) startExpense(c tele.Context) error { return h.startCreate(c, "expense") }
 
 // startCreate показывает список категорий, чтобы выбрать, к какой отнести
-// новую транзакцию — нажатие на категорию продолжит создание.
+// новую транзакцию - нажатие на категорию продолжит создание.
 func (h *TransactionHandlers) startCreate(c tele.Context, txType string) error {
 	acc := h.account(c)
 	if !h.requireLogin(c, acc) {
