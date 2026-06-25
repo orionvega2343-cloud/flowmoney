@@ -9,8 +9,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tele "gopkg.in/telebot.v3"
+
 	"golang.org/x/net/proxy"
 )
 
@@ -22,24 +24,31 @@ func main() {
 		log.Fatal(err)
 	}
 
-	bot, err := tgbotapi.NewBotAPIWithClient(cfg.Token, tgbotapi.APIEndpoint, httpClient)
+	bot, err := tele.NewBot(tele.Settings{
+		Token:     cfg.Token,
+		Client:    httpClient,
+		ParseMode: tele.ModeHTML,
+		Poller:    &tele.LongPoller{Timeout: 60 * time.Second},
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("Бот запущен: @%s\n", bot.Self.UserName)
+	fmt.Printf("Бот запущен: @%s\n", bot.Me.Username)
 
-	router := handlers.NewRouter(handlers.Deps{
-		Bot:      bot,
-		Sessions: handlers.NewSessionStore(cfg.Bot.ApiUrl),
-	})
-
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
-
-	for update := range bot.GetUpdatesChan(u) {
-		router.HandleUpdate(update)
+	// Сбрасываем меню команд до единственного /start — раньше в BotFather
+	// были зарегистрированы текстовые команды (/login, /budget и т.п.),
+	// которые теперь заменены кнопками, но без явного SetCommands Telegram
+	// продолжает показывать их в меню "/".
+	if err := bot.SetCommands([]tele.Command{
+		{Text: "start", Description: "Запустить бота"},
+	}); err != nil {
+		log.Printf("не удалось обновить меню команд: %v", err)
 	}
+
+	handlers.Register(bot, handlers.NewStore(cfg.Bot.ApiUrl))
+
+	bot.Start()
 }
 
 // newHTTPClient опционально заворачивает HTTP-клиент бота в прокси —

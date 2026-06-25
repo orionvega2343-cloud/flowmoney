@@ -1,154 +1,149 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
+
+	tele "gopkg.in/telebot.v3"
 )
 
-type UserHandler interface {
-	StartRegister(session *Session, chatId int64)
-	StartLogin(session *Session, chatId int64)
-	Logout(session *Session, chatId int64)
-	ShowProfile(session *Session, chatId int64)
-	StartBalanceChange(session *Session, chatId int64, topUp bool)
-	HandleText(session *Session, chatId int64, text string)
+var (
+	btnAuthRegister   = tele.Btn{Unique: "auth_register"}
+	btnAuthLogin      = tele.Btn{Unique: "auth_login"}
+	btnProfileBalance = tele.Btn{Unique: "user_balance"}
+)
+
+func authMarkup() *tele.ReplyMarkup {
+	kb := &tele.ReplyMarkup{}
+	kb.Inline(tele.Row{
+		{Unique: "auth_register", Text: "📝 Регистрация"},
+		{Unique: "auth_login", Text: "🔑 Войти"},
+	})
+	return kb
 }
 
-type UserHandlerImpl struct {
-	Deps
+func profileMarkup() *tele.ReplyMarkup {
+	kb := &tele.ReplyMarkup{}
+	kb.Inline(tele.Row{{Unique: "user_balance", Text: "💰 Изменить баланс"}})
+	return kb
 }
 
-func NewUserHandlerImpl(d Deps) *UserHandlerImpl {
-	return &UserHandlerImpl{Deps: d}
+type UserHandlers struct{ Deps }
+
+func NewUserHandlers(d Deps) *UserHandlers { return &UserHandlers{d} }
+
+func (h *UserHandlers) Register(bot *tele.Bot) {
+	bot.Handle("/start", h.start)
+	bot.Handle(&btnAuthRegister, h.startRegister)
+	bot.Handle(&btnAuthLogin, h.startLogin)
+	bot.Handle(&btnProfileBalance, h.startBalance)
+	bot.Handle(txtProfile, h.profile)
+	bot.Handle(txtLogout, h.logout)
 }
 
-func (h *UserHandlerImpl) StartRegister(session *Session, chatId int64) {
-	session.Reset()
-	h.ask(session, chatId, StepRegisterName, "📝 <b>Регистрация</b>\n\nВведите ваше имя:")
+func (h *UserHandlers) start(c tele.Context) error {
+	acc := h.account(c)
+	if acc.LoggedIn() {
+		return c.Send("👋 С возвращением!", mainKeyboard())
+	}
+	return c.Send(
+		"👋 Привет! Я бот <b>FlowMoney</b> — помогу следить за бюджетом.\n\nЗарегистрируйтесь или войдите, чтобы продолжить.",
+		authMarkup(),
+	)
 }
 
-func (h *UserHandlerImpl) StartLogin(session *Session, chatId int64) {
-	session.Reset()
-	h.ask(session, chatId, StepLoginEmail, "🔑 <b>Вход</b>\n\nВведите email:")
+func (h *UserHandlers) startRegister(c tele.Context) error {
+	acc := h.account(c)
+	var name, email string
+
+	return startDialog(c, acc, &Step{
+		Prompt: "📝 <b>Регистрация</b>\n\nВведите ваше имя:",
+		Next: func(reply string) StepResult {
+			name = strings.TrimSpace(reply)
+			return ask("Введите email:", func(reply string) StepResult {
+				email = strings.TrimSpace(reply)
+				return ask("Введите пароль:", func(reply string) StepResult {
+					password := strings.TrimSpace(reply)
+					if err := acc.Client.Register(name, email, password); err != nil {
+						return fail(err)
+					}
+					return done("✅ Регистрация прошла успешно! Теперь войдите в аккаунт.", authMarkup())
+				})
+			})
+		},
+	})
 }
 
-func (h *UserHandlerImpl) Logout(session *Session, chatId int64) {
-	h.Sessions.Drop(chatId)
-	h.send(chatId, "🚪 Вы вышли из аккаунта.", kbPtr(authMenu()))
+func (h *UserHandlers) startLogin(c tele.Context) error {
+	acc := h.account(c)
+	var email string
+
+	return startDialog(c, acc, &Step{
+		Prompt: "🔑 <b>Вход</b>\n\nВведите email:",
+		Next: func(reply string) StepResult {
+			email = strings.TrimSpace(reply)
+			return ask("Введите пароль:", func(reply string) StepResult {
+				password := strings.TrimSpace(reply)
+				userId, err := acc.Client.Login(email, password)
+				if err != nil {
+					return fail(err)
+				}
+				acc.UserId = userId
+				return done("✅ Вход выполнен!", mainKeyboard())
+			})
+		},
+	})
 }
 
-func (h *UserHandlerImpl) ShowProfile(session *Session, chatId int64) {
-	if !h.requireLogin(session, chatId) {
-		return
+func (h *UserHandlers) logout(c tele.Context) error {
+	h.Store.Drop(c.Chat().ID)
+	return c.Send("🚪 Вы вышли из аккаунта.", &tele.ReplyMarkup{RemoveKeyboard: true})
+}
+
+func (h *UserHandlers) profile(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
 	}
 
-	user, err := session.Client.GetUserById(session.UserId)
+	user, err := acc.Client.GetUserById(acc.UserId)
 	if err != nil {
-		h.fail(chatId, "не удалось получить профиль", err, mainMenu())
-		return
+		return h.fail(c, "не удалось получить профиль", err)
 	}
 
 	text := fmt.Sprintf(
 		"👤 <b>Профиль</b>\n\n📧 Email: %s\n💰 Баланс: <b>%.2f</b>\n📅 Создан: %s",
 		user.Email, user.Balance, user.CreatedAt.Format("02.01.2006"),
 	)
-	h.send(chatId, text, kbPtr(profileMenu()))
+	return c.Send(text, profileMarkup())
 }
 
-func (h *UserHandlerImpl) StartBalanceChange(session *Session, chatId int64, topUp bool) {
-	if !h.requireLogin(session, chatId) {
-		return
+func (h *UserHandlers) startBalance(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
 	}
 
-	if topUp {
-		session.Data["balance_op"] = "topup"
-		h.ask(session, chatId, StepBalanceAmount, "➕ На сколько пополнить баланс?")
-	} else {
-		session.Data["balance_op"] = "deduct"
-		h.ask(session, chatId, StepBalanceAmount, "➖ Сколько списать с баланса?")
-	}
-}
+	return startDialog(c, acc, &Step{
+		Prompt: "💰 На сколько изменить баланс? Введите сумму, можно со знаком «-», например 500 или -200:",
+		Next: func(reply string) StepResult {
+			delta, err := strconv.ParseFloat(strings.TrimSpace(reply), 64)
+			if err != nil {
+				return fail(errors.New("сумма должна быть числом"))
+			}
 
-func (h *UserHandlerImpl) HandleText(session *Session, chatId int64, text string) {
-	switch session.Step {
-	case StepRegisterName:
-		session.Data["name"] = text
-		h.ask(session, chatId, StepRegisterEmail, "Введите email:")
-	case StepRegisterEmail:
-		session.Data["email"] = text
-		h.ask(session, chatId, StepRegisterPassword, "Введите пароль:")
-	case StepRegisterPassword:
-		session.Data["password"] = text
-		h.finishRegister(session, chatId)
-	case StepLoginEmail:
-		session.Data["email"] = text
-		h.ask(session, chatId, StepLoginPassword, "Введите пароль:")
-	case StepLoginPassword:
-		session.Data["password"] = text
-		h.finishLogin(session, chatId)
-	case StepBalanceAmount:
-		h.finishBalanceChange(session, chatId, text)
-	}
-}
+			user, err := acc.Client.GetUserById(acc.UserId)
+			if err != nil {
+				return fail(err)
+			}
 
-func (h *UserHandlerImpl) finishRegister(session *Session, chatId int64) {
-	name := session.Data["name"]
-	email := session.Data["email"]
-	password := session.Data["password"]
-	session.Reset()
-
-	err := session.Client.Register(name, email, password)
-	if err != nil {
-		h.fail(chatId, "не удалось зарегистрироваться", err, authMenu())
-		return
-	}
-
-	h.send(chatId, "✅ Регистрация прошла успешно! Теперь войдите в аккаунт.", kbPtr(authMenu()))
-}
-
-func (h *UserHandlerImpl) finishLogin(session *Session, chatId int64) {
-	email := session.Data["email"]
-	password := session.Data["password"]
-	session.Reset()
-
-	userId, err := session.Client.Login(email, password)
-	if err != nil {
-		h.fail(chatId, "не удалось войти", err, authMenu())
-		return
-	}
-
-	session.UserId = userId
-	h.send(chatId, "✅ Вход выполнен!", kbPtr(mainMenu()))
-}
-
-func (h *UserHandlerImpl) finishBalanceChange(session *Session, chatId int64, text string) {
-	amount, err := strconv.ParseFloat(text, 64)
-	if err != nil {
-		h.send(chatId, "⚠️ Введите сумму числом, например 1500.50", nil)
-		return
-	}
-
-	op := session.Data["balance_op"]
-	session.Reset()
-
-	user, err := session.Client.GetUserById(session.UserId)
-	if err != nil {
-		h.fail(chatId, "не удалось получить текущий баланс", err, mainMenu())
-		return
-	}
-
-	newBalance := user.Balance
-	if op == "topup" {
-		newBalance += amount
-	} else {
-		newBalance -= amount
-	}
-
-	updated, err := session.Client.UpdateBalance(session.UserId, newBalance)
-	if err != nil {
-		h.fail(chatId, "не удалось обновить баланс", err, mainMenu())
-		return
-	}
-
-	h.send(chatId, fmt.Sprintf("✅ Баланс обновлён: <b>%.2f</b>", updated.Balance), kbPtr(profileMenu()))
+			updated, err := acc.Client.UpdateBalance(acc.UserId, user.Balance+delta)
+			if err != nil {
+				return fail(err)
+			}
+			return done(fmt.Sprintf("✅ Баланс обновлён: <b>%.2f</b>", updated.Balance))
+		},
+	})
 }

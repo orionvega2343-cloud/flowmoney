@@ -1,126 +1,159 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
+
+	tele "gopkg.in/telebot.v3"
 )
 
-type TransactionHandler interface {
-	StartCreate(session *Session, chatId int64, txType string)
-	StartGet(session *Session, chatId int64)
-	List(session *Session, chatId int64)
-	HandleText(session *Session, chatId int64, text string)
+var (
+	// btnTransactionGet — нажатие на транзакцию в списке вызывает
+	// GetTransactionById с ID из callback-данных.
+	btnTransactionGet = tele.Btn{Unique: "tx_get"}
+	btnTxIncome       = tele.Btn{Unique: "tx_income"}
+	btnTxExpense      = tele.Btn{Unique: "tx_expense"}
+	// btnTxIncomeCategory / btnTxExpenseCategory — выбор категории из списка
+	// для новой транзакции; ID категории приходит в callback-данных.
+	btnTxIncomeCategory  = tele.Btn{Unique: "tx_income_cat"}
+	btnTxExpenseCategory = tele.Btn{Unique: "tx_expense_cat"}
+)
+
+type TransactionHandlers struct{ Deps }
+
+func NewTransactionHandlers(d Deps) *TransactionHandlers { return &TransactionHandlers{d} }
+
+func (h *TransactionHandlers) Register(bot *tele.Bot) {
+	bot.Handle(txtTransactions, h.list)
+	bot.Handle(&btnTxIncome, h.startIncome)
+	bot.Handle(&btnTxExpense, h.startExpense)
+	bot.Handle(&btnTxIncomeCategory, h.pickIncomeCategory)
+	bot.Handle(&btnTxExpenseCategory, h.pickExpenseCategory)
+	bot.Handle(&btnTransactionGet, h.get)
 }
 
-type TransactionHandlerImpl struct {
-	Deps
-}
+func (h *TransactionHandlers) startIncome(c tele.Context) error  { return h.startCreate(c, "income") }
+func (h *TransactionHandlers) startExpense(c tele.Context) error { return h.startCreate(c, "expense") }
 
-func NewTransactionHandlerImpl(d Deps) *TransactionHandlerImpl {
-	return &TransactionHandlerImpl{Deps: d}
-}
-
-func (h *TransactionHandlerImpl) StartCreate(session *Session, chatId int64, txType string) {
-	if !h.requireLogin(session, chatId) {
-		return
+// startCreate показывает список категорий, чтобы выбрать, к какой отнести
+// новую транзакцию - нажатие на категорию продолжит создание.
+func (h *TransactionHandlers) startCreate(c tele.Context, txType string) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
 	}
-	session.Data["type"] = txType
 
-	title := "💵 <b>Новый доход</b>"
+	categories, err := acc.Client.GetByUserId(acc.UserId)
+	if err != nil {
+		return h.fail(c, "не удалось получить категории", err)
+	}
+	if len(categories) == 0 {
+		return c.Send("📁 Сначала создайте категорию в разделе «Категории».")
+	}
+
+	unique := "tx_income_cat"
 	if txType == "expense" {
-		title = "💳 <b>Новый расход</b>"
+		unique = "tx_expense_cat"
 	}
-	h.ask(session, chatId, StepTransactionAmount, title+"\n\nВведите сумму:")
+	kb := &tele.ReplyMarkup{}
+	rows := make([]tele.Row, 0, len(categories))
+	for _, cat := range categories {
+		rows = append(rows, tele.Row{{Unique: unique, Text: fmt.Sprintf("🏷 #%d %s", cat.Id, cat.Title), Data: strconv.Itoa(cat.Id)}})
+	}
+	kb.Inline(rows...)
+
+	return c.Send("Выберите категорию:", kb)
 }
 
-func (h *TransactionHandlerImpl) StartGet(session *Session, chatId int64) {
-	if !h.requireLogin(session, chatId) {
-		return
-	}
-	h.ask(session, chatId, StepTransactionGetId, "🔎 Введите ID транзакции:")
+func (h *TransactionHandlers) pickIncomeCategory(c tele.Context) error {
+	return h.startAmount(c, "income")
 }
 
-func (h *TransactionHandlerImpl) List(session *Session, chatId int64) {
-	if !h.requireLogin(session, chatId) {
-		return
+func (h *TransactionHandlers) pickExpenseCategory(c tele.Context) error {
+	return h.startAmount(c, "expense")
+}
+
+func (h *TransactionHandlers) startAmount(c tele.Context, txType string) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
 	}
 
-	transactions, err := session.Client.GetTransactionByUserId(session.UserId)
+	categoryId, err := strconv.Atoi(c.Args()[0])
 	if err != nil {
-		h.fail(chatId, "не удалось получить транзакции", err, transactionMenu())
-		return
+		return nil
 	}
 
-	if len(transactions) == 0 {
-		h.send(chatId, "💸 У вас пока нет транзакций.", kbPtr(transactionMenu()))
-		return
+	return startDialog(c, acc, &Step{
+		Prompt: fmt.Sprintf("%s Введите сумму:", icon(txType)),
+		Next: func(reply string) StepResult {
+			amount, err := strconv.ParseFloat(strings.TrimSpace(reply), 64)
+			if err != nil {
+				return fail(errors.New("сумма должна быть числом"))
+			}
+
+			transaction, err := acc.Client.CreateTransaction(acc.UserId, amount, txType, time.Now(), categoryId)
+			if err != nil {
+				return fail(err)
+			}
+			return done(fmt.Sprintf("✅ %s Транзакция <b>#%d</b> на сумму <b>%.2f</b> сохранена.", icon(txType), transaction.Id, transaction.Amount))
+		},
+	})
+}
+
+func (h *TransactionHandlers) list(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
 	}
 
-	text := "📋 <b>Ваши транзакции:</b>\n\n"
+	transactions, err := acc.Client.GetTransactionByUserId(acc.UserId)
+	if err != nil {
+		return h.fail(c, "не удалось получить транзакции", err)
+	}
+
+	kb := &tele.ReplyMarkup{}
+	rows := []tele.Row{{
+		{Unique: "tx_income", Text: "💵 Новый доход"},
+		{Unique: "tx_expense", Text: "💳 Новый расход"},
+	}}
 	for _, t := range transactions {
-		icon := "💵"
-		if t.Type == "expense" {
-			icon = "💳"
-		}
-		text += fmt.Sprintf("%s <b>#%d</b> %.2f — %s\n", icon, t.Id, t.Amount, t.Date.Format("02.01.2006"))
+		label := fmt.Sprintf("%s #%d %.2f — %s", icon(t.Type), t.Id, t.Amount, t.Date.Format("02.01.2006"))
+		rows = append(rows, tele.Row{{Unique: "tx_get", Text: label, Data: strconv.Itoa(t.Id)}})
 	}
-	h.send(chatId, text, kbPtr(transactionMenu()))
+	kb.Inline(rows...)
+
+	text := "📋 <b>Ваши транзакции</b>"
+	if len(transactions) == 0 {
+		text = "💸 У вас пока нет транзакций."
+	}
+	return c.Send(text, kb)
 }
 
-func (h *TransactionHandlerImpl) HandleText(session *Session, chatId int64, text string) {
-	switch session.Step {
-	case StepTransactionAmount:
-		if _, err := strconv.ParseFloat(text, 64); err != nil {
-			h.send(chatId, "⚠️ Сумма должна быть числом, попробуйте ещё раз:", nil)
-			return
-		}
-		session.Data["amount"] = text
-		h.ask(session, chatId, StepTransactionCategoryId, "Введите ID категории:")
-	case StepTransactionCategoryId:
-		h.finishCreate(session, chatId, text)
-	case StepTransactionGetId:
-		h.finishGet(session, chatId, text)
+func (h *TransactionHandlers) get(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
 	}
+
+	id, err := strconv.Atoi(c.Args()[0])
+	if err != nil {
+		return nil
+	}
+
+	transaction, err := acc.Client.GetTransactionById(id)
+	if err != nil {
+		return h.fail(c, "не удалось найти транзакцию", err)
+	}
+	return c.Send(fmt.Sprintf("%s <b>#%d</b> %.2f — %s", icon(transaction.Type), transaction.Id, transaction.Amount, transaction.Date.Format("02.01.2006")))
 }
 
-func (h *TransactionHandlerImpl) finishCreate(session *Session, chatId int64, categoryIdText string) {
-	categoryId, err := strconv.Atoi(categoryIdText)
-	if err != nil {
-		h.send(chatId, "⚠️ ID категории должен быть числом, попробуйте ещё раз:", nil)
-		return
+func icon(txType string) string {
+	if txType == "expense" {
+		return "💳"
 	}
-
-	amount, _ := strconv.ParseFloat(session.Data["amount"], 64)
-	txType := session.Data["type"]
-	session.Reset()
-
-	transaction, err := session.Client.CreateTransaction(session.UserId, amount, txType, time.Now(), categoryId)
-	if err != nil {
-		h.fail(chatId, "не удалось создать транзакцию", err, transactionMenu())
-		return
-	}
-
-	h.send(chatId, fmt.Sprintf("✅ Транзакция <b>#%d</b> на сумму <b>%.2f</b> сохранена.", transaction.Id, transaction.Amount), kbPtr(transactionMenu()))
-}
-
-func (h *TransactionHandlerImpl) finishGet(session *Session, chatId int64, text string) {
-	id, err := strconv.Atoi(text)
-	if err != nil {
-		h.send(chatId, "⚠️ ID должен быть числом, попробуйте ещё раз:", nil)
-		return
-	}
-	session.Reset()
-
-	transaction, err := session.Client.GetTransactionById(id)
-	if err != nil {
-		h.fail(chatId, "не удалось найти транзакцию", err, transactionMenu())
-		return
-	}
-
-	icon := "💵"
-	if transaction.Type == "expense" {
-		icon = "💳"
-	}
-	h.send(chatId, fmt.Sprintf("%s <b>#%d</b> %.2f — %s", icon, transaction.Id, transaction.Amount, transaction.Date.Format("02.01.2006")), kbPtr(transactionMenu()))
+	return "💵"
 }

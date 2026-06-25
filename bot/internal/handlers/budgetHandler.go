@@ -1,230 +1,260 @@
 package handlers
 
 import (
+	"errors"
 	"flowmoney/bot/internal/models"
 	"fmt"
 	"strconv"
+	"strings"
+
+	tele "gopkg.in/telebot.v3"
 )
 
-type BudgetHandler interface {
-	StartCreate(session *Session, chatId int64)
-	StartGet(session *Session, chatId int64)
-	StartGetByCategory(session *Session, chatId int64)
-	StartGetByMonth(session *Session, chatId int64)
-	StartUpdate(session *Session, chatId int64)
-	StartDelete(session *Session, chatId int64)
-	HandleText(session *Session, chatId int64, text string)
+var (
+	btnBudgetNew      = tele.Btn{Unique: "bg_new"}
+	btnBudgetGet      = tele.Btn{Unique: "bg_get"}
+	btnBudgetByCat    = tele.Btn{Unique: "bg_by_cat"}
+	btnBudgetByMonth  = tele.Btn{Unique: "bg_by_month"}
+	btnBudgetUpdate   = tele.Btn{Unique: "bg_update"}
+	btnBudgetDelete   = tele.Btn{Unique: "bg_delete"}
+	btnBudgetNewCat   = tele.Btn{Unique: "bg_new_cat"}
+	btnBudgetByCatPck = tele.Btn{Unique: "bg_by_cat_pick"}
+)
+
+type BudgetHandlers struct{ Deps }
+
+func NewBudgetHandlers(d Deps) *BudgetHandlers { return &BudgetHandlers{d} }
+
+func (h *BudgetHandlers) Register(bot *tele.Bot) {
+	bot.Handle(txtBudget, h.menu)
+	bot.Handle(&btnBudgetNew, h.startNew)
+	bot.Handle(&btnBudgetNewCat, h.pickNewCategory)
+	bot.Handle(&btnBudgetGet, h.startGet)
+	bot.Handle(&btnBudgetByCat, h.startByCategory)
+	bot.Handle(&btnBudgetByCatPck, h.pickByCategory)
+	bot.Handle(&btnBudgetByMonth, h.startByMonth)
+	bot.Handle(&btnBudgetUpdate, h.startUpdate)
+	bot.Handle(&btnBudgetDelete, h.startDelete)
 }
 
-type BudgetHandlerImpl struct {
-	Deps
-}
-
-func NewBudgetHandlerImpl(d Deps) *BudgetHandlerImpl {
-	return &BudgetHandlerImpl{Deps: d}
-}
-
-func (h *BudgetHandlerImpl) StartCreate(session *Session, chatId int64) {
-	if !h.requireLogin(session, chatId) {
-		return
+func (h *BudgetHandlers) menu(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
 	}
-	h.ask(session, chatId, StepBudgetCreateCategoryId, "➕ <b>Новый бюджет</b>\n\nВведите ID категории:")
+
+	kb := &tele.ReplyMarkup{}
+	kb.Inline(
+		tele.Row{{Unique: "bg_new", Text: "➕ Новый бюджет"}},
+		tele.Row{
+			{Unique: "bg_get", Text: "🔎 По ID"},
+			{Unique: "bg_by_cat", Text: "🏷 По категории"},
+		},
+		tele.Row{{Unique: "bg_by_month", Text: "📅 За месяц"}},
+		tele.Row{
+			{Unique: "bg_update", Text: "✏️ Изменить"},
+			{Unique: "bg_delete", Text: "🗑 Удалить"},
+		},
+	)
+	return c.Send("📊 <b>Бюджет</b>", kb)
 }
 
-func (h *BudgetHandlerImpl) StartGet(session *Session, chatId int64) {
-	if !h.requireLogin(session, chatId) {
-		return
-	}
-	h.ask(session, chatId, StepBudgetGetId, "🔎 Введите ID бюджета:")
-}
-
-func (h *BudgetHandlerImpl) StartGetByCategory(session *Session, chatId int64) {
-	if !h.requireLogin(session, chatId) {
-		return
-	}
-	h.ask(session, chatId, StepBudgetCategoryId, "🏷 Введите ID категории:")
-}
-
-func (h *BudgetHandlerImpl) StartGetByMonth(session *Session, chatId int64) {
-	if !h.requireLogin(session, chatId) {
-		return
-	}
-	h.ask(session, chatId, StepBudgetMonthMonth, "📅 Введите месяц (1-12):")
-}
-
-func (h *BudgetHandlerImpl) StartUpdate(session *Session, chatId int64) {
-	if !h.requireLogin(session, chatId) {
-		return
-	}
-	h.ask(session, chatId, StepBudgetUpdateId, "✏️ Введите ID бюджета, который нужно изменить:")
-}
-
-func (h *BudgetHandlerImpl) StartDelete(session *Session, chatId int64) {
-	if !h.requireLogin(session, chatId) {
-		return
-	}
-	h.ask(session, chatId, StepBudgetDeleteId, "🗑 Введите ID бюджета, который нужно удалить:")
-}
-
-func (h *BudgetHandlerImpl) HandleText(session *Session, chatId int64, text string) {
-	switch session.Step {
-	case StepBudgetCreateCategoryId:
-		if _, err := strconv.Atoi(text); err != nil {
-			h.send(chatId, "⚠️ ID категории должен быть числом, попробуйте ещё раз:", nil)
-			return
-		}
-		session.Data["category_id"] = text
-		h.ask(session, chatId, StepBudgetCreateAmount, "Введите сумму бюджета:")
-	case StepBudgetCreateAmount:
-		if _, err := strconv.ParseFloat(text, 64); err != nil {
-			h.send(chatId, "⚠️ Сумма должна быть числом, попробуйте ещё раз:", nil)
-			return
-		}
-		session.Data["amount"] = text
-		h.ask(session, chatId, StepBudgetCreateMonth, "Введите месяц (1-12):")
-	case StepBudgetCreateMonth:
-		if _, err := strconv.Atoi(text); err != nil {
-			h.send(chatId, "⚠️ Месяц должен быть числом от 1 до 12, попробуйте ещё раз:", nil)
-			return
-		}
-		session.Data["month"] = text
-		h.ask(session, chatId, StepBudgetCreateYear, "Введите год:")
-	case StepBudgetCreateYear:
-		h.finishCreate(session, chatId, text)
-	case StepBudgetGetId:
-		h.finishGet(session, chatId, text)
-	case StepBudgetCategoryId:
-		h.finishGetByCategory(session, chatId, text)
-	case StepBudgetMonthMonth:
-		if _, err := strconv.Atoi(text); err != nil {
-			h.send(chatId, "⚠️ Месяц должен быть числом от 1 до 12, попробуйте ещё раз:", nil)
-			return
-		}
-		session.Data["month"] = text
-		h.ask(session, chatId, StepBudgetMonthYear, "Введите год:")
-	case StepBudgetMonthYear:
-		h.finishGetByMonth(session, chatId, text)
-	case StepBudgetUpdateId:
-		if _, err := strconv.Atoi(text); err != nil {
-			h.send(chatId, "⚠️ ID должен быть числом, попробуйте ещё раз:", nil)
-			return
-		}
-		session.Data["id"] = text
-		h.ask(session, chatId, StepBudgetUpdateAmount, "Введите новую сумму бюджета:")
-	case StepBudgetUpdateAmount:
-		h.finishUpdate(session, chatId, text)
-	case StepBudgetDeleteId:
-		h.finishDelete(session, chatId, text)
-	}
-}
-
-func (h *BudgetHandlerImpl) finishCreate(session *Session, chatId int64, yearText string) {
-	year, err := strconv.Atoi(yearText)
+// categoryPickerMarkup строит инлайн-список категорий пользователя для
+// выбора — нажатие на категорию продолжит сценарий с заданным unique.
+func (h *BudgetHandlers) categoryPickerMarkup(acc *Account, unique string) (*tele.ReplyMarkup, error) {
+	categories, err := acc.Client.GetByUserId(acc.UserId)
 	if err != nil {
-		h.send(chatId, "⚠️ Год должен быть числом, попробуйте ещё раз:", nil)
-		return
+		return nil, err
 	}
-
-	categoryId, _ := strconv.Atoi(session.Data["category_id"])
-	amount, _ := strconv.ParseFloat(session.Data["amount"], 64)
-	month, _ := strconv.Atoi(session.Data["month"])
-	session.Reset()
-
-	budget, err := session.Client.CreateBudget(session.UserId, categoryId, amount, month, year)
-	if err != nil {
-		h.fail(chatId, "не удалось создать бюджет", err, budgetMenu())
-		return
+	rows := make([]tele.Row, 0, len(categories))
+	for _, cat := range categories {
+		rows = append(rows, tele.Row{{Unique: unique, Text: fmt.Sprintf("🏷 #%d %s", cat.Id, cat.Title), Data: strconv.Itoa(cat.Id)}})
 	}
-
-	h.send(chatId, fmt.Sprintf("✅ Бюджет <b>#%d</b> на <b>%.2f</b> создан (%02d.%d).", budget.Id, budget.Amount, budget.Month, budget.Year), kbPtr(budgetMenu()))
+	kb := &tele.ReplyMarkup{}
+	kb.Inline(rows...)
+	return kb, nil
 }
 
-func (h *BudgetHandlerImpl) finishGet(session *Session, chatId int64, text string) {
-	id, err := strconv.Atoi(text)
-	if err != nil {
-		h.send(chatId, "⚠️ ID должен быть числом, попробуйте ещё раз:", nil)
-		return
-	}
-	session.Reset()
-
-	budget, err := session.Client.GetBudgetById(id)
-	if err != nil {
-		h.fail(chatId, "не удалось найти бюджет", err, budgetMenu())
-		return
+func (h *BudgetHandlers) startNew(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
 	}
 
-	h.send(chatId, formatBudget(budget), kbPtr(budgetMenu()))
+	kb, err := h.categoryPickerMarkup(acc, "bg_new_cat")
+	if err != nil {
+		return h.fail(c, "не удалось получить категории", err)
+	}
+	return c.Send("➕ <b>Новый бюджет</b>\n\nВыберите категорию:", kb)
 }
 
-func (h *BudgetHandlerImpl) finishGetByCategory(session *Session, chatId int64, text string) {
-	categoryId, err := strconv.Atoi(text)
-	if err != nil {
-		h.send(chatId, "⚠️ ID категории должен быть числом, попробуйте ещё раз:", nil)
-		return
-	}
-	session.Reset()
-
-	budget, err := session.Client.GetBudgetByCategoryId(categoryId)
-	if err != nil {
-		h.fail(chatId, "не удалось найти бюджет по категории", err, budgetMenu())
-		return
+func (h *BudgetHandlers) pickNewCategory(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
 	}
 
-	h.send(chatId, formatBudget(budget), kbPtr(budgetMenu()))
+	categoryId, err := strconv.Atoi(c.Args()[0])
+	if err != nil {
+		return nil
+	}
+
+	return startDialog(c, acc, &Step{
+		Prompt: "Введите сумму бюджета:",
+		Next: func(reply string) StepResult {
+			amount, err := strconv.ParseFloat(strings.TrimSpace(reply), 64)
+			if err != nil {
+				return fail(errors.New("сумма должна быть числом"))
+			}
+			return ask("Введите месяц (1-12):", func(reply string) StepResult {
+				month, err := strconv.Atoi(strings.TrimSpace(reply))
+				if err != nil {
+					return fail(errors.New("месяц должен быть числом от 1 до 12"))
+				}
+				return ask("Введите год:", func(reply string) StepResult {
+					year, err := strconv.Atoi(strings.TrimSpace(reply))
+					if err != nil {
+						return fail(errors.New("год должен быть числом"))
+					}
+					budget, err := acc.Client.CreateBudget(acc.UserId, categoryId, amount, month, year)
+					if err != nil {
+						return fail(err)
+					}
+					return done(fmt.Sprintf("✅ Бюджет <b>#%d</b> на <b>%.2f</b> создан (%02d.%d).", budget.Id, budget.Amount, budget.Month, budget.Year))
+				})
+			})
+		},
+	})
 }
 
-func (h *BudgetHandlerImpl) finishGetByMonth(session *Session, chatId int64, yearText string) {
-	year, err := strconv.Atoi(yearText)
-	if err != nil {
-		h.send(chatId, "⚠️ Год должен быть числом, попробуйте ещё раз:", nil)
-		return
+func (h *BudgetHandlers) startGet(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
 	}
 
-	month, _ := strconv.Atoi(session.Data["month"])
-	session.Reset()
-
-	budget, err := session.Client.GetByUserIdAndMonth(session.UserId, month, year)
-	if err != nil {
-		h.fail(chatId, "не удалось получить бюджет за месяц", err, budgetMenu())
-		return
-	}
-
-	h.send(chatId, formatBudget(budget), kbPtr(budgetMenu()))
+	return startDialog(c, acc, &Step{
+		Prompt: "🔎 Введите ID бюджета:",
+		Next: func(reply string) StepResult {
+			id, err := strconv.Atoi(strings.TrimSpace(reply))
+			if err != nil {
+				return fail(errors.New("ID должен быть числом"))
+			}
+			budget, err := acc.Client.GetBudgetById(id)
+			if err != nil {
+				return fail(err)
+			}
+			return done(formatBudget(budget))
+		},
+	})
 }
 
-func (h *BudgetHandlerImpl) finishUpdate(session *Session, chatId int64, amountText string) {
-	amount, err := strconv.ParseFloat(amountText, 64)
-	if err != nil {
-		h.send(chatId, "⚠️ Сумма должна быть числом, попробуйте ещё раз:", nil)
-		return
+func (h *BudgetHandlers) startByCategory(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
 	}
 
-	id, _ := strconv.Atoi(session.Data["id"])
-	session.Reset()
-
-	budget, err := session.Client.UpdateBudget(amount, id)
+	kb, err := h.categoryPickerMarkup(acc, "bg_by_cat_pick")
 	if err != nil {
-		h.fail(chatId, "не удалось изменить бюджет", err, budgetMenu())
-		return
+		return h.fail(c, "не удалось получить категории", err)
 	}
-
-	h.send(chatId, fmt.Sprintf("✅ Бюджет <b>#%d</b> обновлён: <b>%.2f</b>", budget.Id, budget.Amount), kbPtr(budgetMenu()))
+	return c.Send("🏷 Выберите категорию:", kb)
 }
 
-func (h *BudgetHandlerImpl) finishDelete(session *Session, chatId int64, text string) {
-	id, err := strconv.Atoi(text)
+func (h *BudgetHandlers) pickByCategory(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
+	}
+
+	categoryId, err := strconv.Atoi(c.Args()[0])
 	if err != nil {
-		h.send(chatId, "⚠️ ID должен быть числом, попробуйте ещё раз:", nil)
-		return
-	}
-	session.Reset()
-
-	if err := session.Client.DeleteBudgetById(id); err != nil {
-		h.fail(chatId, "не удалось удалить бюджет", err, budgetMenu())
-		return
+		return nil
 	}
 
-	h.send(chatId, fmt.Sprintf("✅ Бюджет <b>#%d</b> удалён.", id), kbPtr(budgetMenu()))
+	budget, err := acc.Client.GetBudgetByCategoryId(categoryId)
+	if err != nil {
+		return h.fail(c, "не удалось найти бюджет по категории", err)
+	}
+	return c.Send(formatBudget(budget))
+}
+
+func (h *BudgetHandlers) startByMonth(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
+	}
+
+	return startDialog(c, acc, &Step{
+		Prompt: "📅 Введите месяц (1-12):",
+		Next: func(reply string) StepResult {
+			month, err := strconv.Atoi(strings.TrimSpace(reply))
+			if err != nil {
+				return fail(errors.New("месяц должен быть числом от 1 до 12"))
+			}
+			return ask("Введите год:", func(reply string) StepResult {
+				year, err := strconv.Atoi(strings.TrimSpace(reply))
+				if err != nil {
+					return fail(errors.New("год должен быть числом"))
+				}
+				budget, err := acc.Client.GetByUserIdAndMonth(acc.UserId, month, year)
+				if err != nil {
+					return fail(err)
+				}
+				return done(formatBudget(budget))
+			})
+		},
+	})
+}
+
+func (h *BudgetHandlers) startUpdate(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
+	}
+
+	return startDialog(c, acc, &Step{
+		Prompt: "✏️ Введите ID бюджета, который нужно изменить:",
+		Next: func(reply string) StepResult {
+			id, err := strconv.Atoi(strings.TrimSpace(reply))
+			if err != nil {
+				return fail(errors.New("ID должен быть числом"))
+			}
+			return ask("Введите новую сумму бюджета:", func(reply string) StepResult {
+				amount, err := strconv.ParseFloat(strings.TrimSpace(reply), 64)
+				if err != nil {
+					return fail(errors.New("сумма должна быть числом"))
+				}
+				budget, err := acc.Client.UpdateBudget(amount, id)
+				if err != nil {
+					return fail(err)
+				}
+				return done(fmt.Sprintf("✅ Бюджет <b>#%d</b> обновлён: <b>%.2f</b>", budget.Id, budget.Amount))
+			})
+		},
+	})
+}
+
+func (h *BudgetHandlers) startDelete(c tele.Context) error {
+	acc := h.account(c)
+	if !h.requireLogin(c, acc) {
+		return nil
+	}
+
+	return startDialog(c, acc, &Step{
+		Prompt: "🗑 Введите ID бюджета, который нужно удалить:",
+		Next: func(reply string) StepResult {
+			id, err := strconv.Atoi(strings.TrimSpace(reply))
+			if err != nil {
+				return fail(errors.New("ID должен быть числом"))
+			}
+			if err := acc.Client.DeleteBudgetById(id); err != nil {
+				return fail(err)
+			}
+			return done(fmt.Sprintf("✅ Бюджет <b>#%d</b> удалён.", id))
+		},
+	})
 }
 
 func formatBudget(b models.Budget) string {
